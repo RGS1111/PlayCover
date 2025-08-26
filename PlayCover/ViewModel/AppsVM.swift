@@ -63,12 +63,12 @@ class AppsVM: ObservableObject {
 
                 for bundleId in apps.map({ $0.info.bundleIdentifier })
                     where !(try PlayApp.bundleIDCache).contains(bundleId) {
-                    if let bundleID = "\(bundleId)\n".data(using: .utf8) {
-                        let cacheFile = try FileHandle(forUpdating: PlayApp.bundleIDCacheURL)
-                        try cacheFile.seekToEnd()
-                        try cacheFile.write(contentsOf: bundleID)
-                        try cacheFile.close()
-                    }
+                    let dataBundleID = Data(bundleId.utf8)
+
+                    let cacheFile = try FileHandle(forUpdating: PlayApp.bundleIDCacheURL)
+                    try cacheFile.seekToEnd()
+                    try cacheFile.write(contentsOf: dataBundleID)
+                    try cacheFile.close()
                 }
             } catch {
                 Log.shared.error(error)
