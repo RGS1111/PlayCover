@@ -15,6 +15,7 @@ jobs:
       - name: Install dependencies
         shell: bash
         run: |
+          brew install swiftlint
           which carthage && carthage version
           xcodebuild -version || true
 
