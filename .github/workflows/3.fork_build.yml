@@ -1,0 +1,61 @@
+name: Fork build (ad-hoc signed)
+on:
+  workflow_dispatch:
+env:
+  CI: true
+jobs:
+  build:
+    runs-on: macos-latest
+    env:
+      GITHUB_ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install dependencies
+        shell: bash
+        run: brew install carthage
+
+      - name: Update Carthage dependencies
+        shell: bash
+        run: carthage update --use-xcframeworks
+
+      - name: Patch codesign phase for ad-hoc identity
+        shell: bash
+        run: |
+          python3 - <<'EOF'
+          from pathlib import Path
+          p = Path("PlayCover.xcodeproj/project.pbxproj")
+          s = p.read_text()
+          s = s.replace('-o runtime -s ', '-s ')
+          s = s.replace('IDENTITY=${EXPANDED_CODE_SIGN_IDENTITY_NAME};',
+                        'IDENTITY=${EXPANDED_CODE_SIGN_IDENTITY_NAME:--};')
+          p.write_text(s)
+          EOF
+
+      - name: Build PlayCover (Nightly, ad-hoc)
+        shell: bash
+        run: |
+          xcodebuild -project PlayCover.xcodeproj -scheme PlayCover -configuration Nightly \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM= \
+            PROVISIONING_PROFILE_SPECIFIER= \
+            ENABLE_HARDENED_RUNTIME=NO \
+            FASTLANE=1 \
+            build
+
+      - name: Re-sign app bundle ad-hoc
+        shell: bash
+        run: codesign --force --deep --sign - build/Build/Products/Nightly/PlayCover.app
+
+      - name: Zip app bundle
+        shell: bash
+        run: ditto -c -k --keepParent --sequesterRsrc build/Build/Products/Nightly/PlayCover.app PlayCover.app.zip
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: PlayCover_fork_${{ github.run_number }}
+          path: PlayCover.app.zip
