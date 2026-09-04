@@ -205,11 +205,12 @@ class Macho {
             binary.replaceSubrange(oldCommandsEnd..<oldCommandsEnd + overlap,
                                    with: Data(keptCommands[(oldCommandsEnd - headerSize)..<newSizeofcmds]))
         } else {
-            binary.replaceSubrange(headerSize..<oldCommandsEnd, with: keptCommands)
-            if newSizeofcmds < oldCommandsEnd - headerSize {
-                binary.replaceSubrange(headerSize + newSizeofcmds ..< oldCommandsEnd,
-                                       with: Data(count: oldCommandsEnd - headerSize - newSizeofcmds))
-            }
+            // Pad the kept commands back to the old commands size inside the
+            // replacement data itself; two separate replaceSubrange calls would
+            // shrink the file and shift the payload, breaking segment offsets.
+            var newCommands = keptCommands
+            newCommands.append(Data(count: oldCommandsEnd - headerSize - newSizeofcmds))
+            binary.replaceSubrange(headerSize..<oldCommandsEnd, with: newCommands)
         }
 
         header.ncmds = header.ncmds - UInt32(removedCount) + 1
