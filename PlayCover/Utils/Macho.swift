@@ -5,6 +5,7 @@
 
 import Foundation
 
+// swiftlint:disable:next type_body_length
 class Macho {
     static func stripBinary(_ binary: inout Data) throws {
         var header = binary.extract(fat_header.self)
@@ -129,6 +130,7 @@ class Macho {
         }, atEnd: false)
     }
 
+    // swiftlint:disable:next function_body_length cyclomatic_complexity
     static func replaceAllVersionCommands(_ binary: inout Data) throws {
         let headerSize = MemoryLayout<mach_header_64>.size
         var header = binary.extract(mach_header_64.self)
@@ -368,6 +370,7 @@ class Macho {
         return result
     }
 
+    // swiftlint:disable:next cyclomatic_complexity
     static func containsNonCatalystVersionCommand(_ url: URL) throws -> Bool {
         var binary = try Data(contentsOf: url)
         try stripBinary(&binary)
