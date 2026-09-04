@@ -14,11 +14,18 @@ jobs:
 
       - name: Install dependencies
         shell: bash
-        run: brew install carthage
+        run: |
+          which carthage && carthage version
+          xcodebuild -version | head -1
 
       - name: Update Carthage dependencies
         shell: bash
-        run: carthage update --use-xcframeworks
+        run: |
+          carthage update --use-xcframeworks 2>&1 | tee carthage.log || { \
+            echo "=== carthage.log tail ==="; tail -40 carthage.log; \
+            echo "=== xcodebuild logs ==="; \
+            for f in "${TMPDIR}"/carthage-xcodebuild.*.log; do echo "--- $f"; tail -60 "$f"; done; \
+            exit 1; }
 
       - name: Patch codesign phase for ad-hoc identity
         shell: bash
