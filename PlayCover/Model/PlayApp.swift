@@ -99,6 +99,10 @@ class PlayApp: BaseApp {
                 Log.shared.error("PlayTools are not installed! Please move PlayCover.app into Applications!")
             } else if try !Macho.isMachoValidArch(executable) {
                 Log.shared.error("The app threw an error during conversion.")
+            } else if try Macho.containsNonCatalystVersionCommand(executable)
+                        && ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27 {
+                Log.shared.error("This app was converted by an older PlayCover version. "
+                    + "Reinstall the app to fix the macOS 27 platform mismatch.")
             } else {
                 // Clear any debug-related env vars that could affect the launched app
                 self.clearDebugAffectingEnvironment()

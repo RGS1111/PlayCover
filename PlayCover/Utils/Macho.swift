@@ -46,8 +46,8 @@ class Macho {
 
         print("Stripping MachO...")
         try stripBinary(&binary)
-        print("Replacing version command...")
-        try replaceVersionCommand(&binary)
+        print("Removing version commands...")
+        try replaceAllVersionCommands(&binary)
         print("Replacing instances of @rpath dylibs...")
         try replaceLibraries(&binary)
 
@@ -129,7 +129,50 @@ class Macho {
         }, atEnd: false)
     }
 
-    static func replaceVersionCommand(_ binary: inout Data) throws {
+    static func replaceAllVersionCommands(_ binary: inout Data) throws {
+        let headerSize = MemoryLayout<mach_header_64>.size
+        var header = binary.extract(mach_header_64.self)
+        if header.magic != MH_MAGIC_64 && header.magic != MH_CIGAM_64 {
+            print("Cannot replace version commands: Mach-O file is not 64-bit")
+            throw PlayCoverError.appCorrupted
+        }
+        let shouldSwap = header.magic == MH_CIGAM_64
+        if shouldSwap {
+            swap_mach_header_64(&header, NXHostByteOrder())
+        }
+
+        let oldCommandsEnd = headerSize + Int(header.sizeofcmds)
+        var keptCommands = Data()
+        var removedTypes: [UInt32: Int] = [:]
+
+        let walkedEnd = try iterateLoadCommands(binary: binary) { offset, needSwap in
+            let loadCommand = binary.extract(load_command.self,
+                                             offset: offset,
+                                             swap: needSwap ? swap_load_command:nil)
+            if isVersionCommand(loadCommand.cmd) {
+                removedTypes[loadCommand.cmd, default: 0] += 1
+            } else {
+                keptCommands.append(binary[offset ..< offset + Int(loadCommand.cmdsize)])
+            }
+            return false
+        }
+        if walkedEnd != oldCommandsEnd {
+            print("Error while replacing version commands: end of commands mismatch")
+            if walkedEnd < oldCommandsEnd {
+                // Preserve any unwalked bytes verbatim (corrupt ncmds safety net)
+                keptCommands.append(binary[walkedEnd ..< oldCommandsEnd])
+            }
+        }
+
+        let removedCount = removedTypes.values.reduce(0, +)
+        if removedCount > Int(header.ncmds) {
+            print("Cannot replace version commands: Mach-O file is corrupted")
+            throw PlayCoverError.appCorrupted
+        }
+        let removedSummary = removedTypes.sorted { $0.key < $1.key }
+            .map { "\(versionCommandName($0.key)): \($0.value)" }
+            .joined(separator: ", ")
+        print("Removed \(removedCount) version load command(s) (\(removedSummary))")
 
         var macCatalystCommand = build_version_command(cmd: UInt32(LC_BUILD_VERSION),
                                                        cmdsize: 24,
@@ -137,22 +180,61 @@ class Macho {
                                                        minos: 0x000b0000,
                                                        sdk: 0x000e0000,
                                                        ntools: 0)
+        if shouldSwap {
+            swap_build_version_command(&macCatalystCommand, NX_BigEndian)
+        }
+        keptCommands.append(Data(bytes: &macCatalystCommand,
+                                 count: MemoryLayout<build_version_command>.size))
 
-        try replaceLastCommand(&binary, satisfy: {data, shouldSwap in
-            let loadCommand = data.extract(load_command.self,
-                                           offset: data.startIndex,
-                                           swap: shouldSwap ? swap_load_command:nil)
-            return [UInt32(LC_VERSION_MIN_IPHONEOS),
-                    UInt32(LC_VERSION_MIN_MACOSX),
-                    UInt32(LC_BUILD_VERSION)]
-                .contains(loadCommand.cmd)
-
-        }, with: {shouldSwap in
-            if shouldSwap {
-                swap_build_version_command(&macCatalystCommand, NX_BigEndian)
+        let newSizeofcmds = keptCommands.count
+        let overlap = newSizeofcmds - Int(header.sizeofcmds)
+        if overlap > 0 {
+            if oldCommandsEnd + overlap > binary.count {
+                print("Cannot replace version commands: not enough space after load commands")
+                throw PlayCoverError.appCorrupted
             }
-            return Data(bytes: &macCatalystCommand, count: MemoryLayout<build_version_command>.size)
-        }, atEnd: true)
+            if let nonZero = binary[oldCommandsEnd ..< oldCommandsEnd + overlap]
+                .first(where: { $0 != 0 }) {
+                print("Non zero value \(nonZero) found after load commands. "
+                    + "Injection may overlap data section")
+            }
+            binary.replaceSubrange(headerSize..<oldCommandsEnd,
+                                   with: Data(keptCommands[0 ..< oldCommandsEnd - headerSize]))
+            binary.replaceSubrange(oldCommandsEnd..<oldCommandsEnd + overlap,
+                                   with: Data(keptCommands[(oldCommandsEnd - headerSize)..<newSizeofcmds]))
+        } else {
+            binary.replaceSubrange(headerSize..<oldCommandsEnd, with: keptCommands)
+            if newSizeofcmds < oldCommandsEnd - headerSize {
+                binary.replaceSubrange(headerSize + newSizeofcmds ..< oldCommandsEnd,
+                                       with: Data(count: oldCommandsEnd - headerSize - newSizeofcmds))
+            }
+        }
+
+        header.ncmds = header.ncmds - UInt32(removedCount) + 1
+        header.sizeofcmds = UInt32(newSizeofcmds)
+        if shouldSwap {
+            swap_mach_header_64(&header, NX_BigEndian)
+        }
+        binary.replaceSubrange(0..<headerSize, with: Data(bytes: &header, count: headerSize))
+    }
+
+    private static func isVersionCommand(_ cmd: UInt32) -> Bool {
+        [UInt32(LC_VERSION_MIN_IPHONEOS),
+         UInt32(LC_VERSION_MIN_MACOSX),
+         UInt32(LC_VERSION_MIN_TVOS),
+         UInt32(LC_VERSION_MIN_WATCHOS),
+         UInt32(LC_BUILD_VERSION)].contains(cmd)
+    }
+
+    private static func versionCommandName(_ cmd: UInt32) -> String {
+        switch cmd {
+        case UInt32(LC_VERSION_MIN_IPHONEOS): return "LC_VERSION_MIN_IPHONEOS"
+        case UInt32(LC_VERSION_MIN_MACOSX): return "LC_VERSION_MIN_MACOSX"
+        case UInt32(LC_VERSION_MIN_TVOS): return "LC_VERSION_MIN_TVOS"
+        case UInt32(LC_VERSION_MIN_WATCHOS): return "LC_VERSION_MIN_WATCHOS"
+        case UInt32(LC_BUILD_VERSION): return "LC_BUILD_VERSION"
+        default: return "unknown(\(cmd))"
+        }
     }
 
     static func replaceLastCommand(_ binary: inout Data,
@@ -282,6 +364,27 @@ class Macho {
                 return true
             }
             return false
+        }
+        return result
+    }
+
+    static func containsNonCatalystVersionCommand(_ url: URL) throws -> Bool {
+        var binary = try Data(contentsOf: url)
+        try stripBinary(&binary)
+        var result = false
+        _ = try iterateLoadCommands(binary: binary) { offset, shouldSwap in
+            let loadCommand = binary.extract(load_command.self,
+                                             offset: offset,
+                                             swap: shouldSwap ? swap_load_command:nil)
+            if loadCommand.cmd == UInt32(LC_BUILD_VERSION) {
+                let versionCommand = binary.extract(build_version_command.self,
+                                                    offset: offset,
+                                                    swap: shouldSwap ? swap_build_version_command:nil)
+                result = versionCommand.platform != PLATFORM_MACCATALYST
+            } else if isVersionCommand(loadCommand.cmd) {
+                result = true
+            }
+            return result
         }
         return result
     }
