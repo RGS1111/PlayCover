@@ -16,7 +16,7 @@ jobs:
         shell: bash
         run: |
           which carthage && carthage version
-          xcodebuild -version | head -1
+          xcodebuild -version || true
 
       - name: Update Carthage dependencies
         shell: bash
