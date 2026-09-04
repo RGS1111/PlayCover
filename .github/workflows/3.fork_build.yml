@@ -37,7 +37,7 @@ jobs:
           s = p.read_text()
           s = s.replace('-o runtime -s ', '-s ')
           s = s.replace('IDENTITY=${EXPANDED_CODE_SIGN_IDENTITY_NAME};',
-                        'IDENTITY=${EXPANDED_CODE_SIGN_IDENTITY_NAME:--};')
+                        'IDENTITY=${EXPANDED_CODE_SIGN_IDENTITY};')
           p.write_text(s)
           EOF
 
