@@ -370,7 +370,6 @@ class Macho {
         return result
     }
 
-    // swiftlint:disable:next cyclomatic_complexity
     static func containsNonCatalystVersionCommand(_ url: URL) throws -> Bool {
         var binary = try Data(contentsOf: url)
         try stripBinary(&binary)

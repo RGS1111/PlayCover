@@ -60,6 +60,15 @@ class PlayApp: BaseApp {
     lazy var keymapping = Keymapping(info)
     lazy var container = AppContainer(bundleId: info.bundleIdentifier)
 
+    /// Returns true on macOS 27+ when the executable still carries iOS version
+    /// load commands left over from a conversion by an older PlayCover build.
+    private static func isMacOS27PlatformMismatch(_ executable: URL) throws -> Bool {
+        guard ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27 else {
+            return false
+        }
+        return try Macho.containsNonCatalystVersionCommand(executable)
+    }
+
     // MARK: - Launch
     func launch() async {
         do {
@@ -99,8 +108,7 @@ class PlayApp: BaseApp {
                 Log.shared.error("PlayTools are not installed! Please move PlayCover.app into Applications!")
             } else if try !Macho.isMachoValidArch(executable) {
                 Log.shared.error("The app threw an error during conversion.")
-            } else if try Macho.containsNonCatalystVersionCommand(executable)
-                        && ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27 {
+            } else if try PlayApp.isMacOS27PlatformMismatch(executable) {
                 Log.shared.error("This app was converted by an older PlayCover version. "
                     + "Reinstall the app to fix the macOS 27 platform mismatch.")
             } else {
