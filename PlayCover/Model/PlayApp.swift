@@ -70,6 +70,7 @@ class PlayApp: BaseApp {
     }
 
     // MARK: - Launch
+    // swiftlint:disable:next cyclomatic_complexity
     func launch() async {
         do {
             isStarting = true
